@@ -1,0 +1,30 @@
+<?php 
+
+use Base\Console\Command;
+
+class EmailSenderCommand extends Command
+{
+
+    protected $signature;
+
+    protected $description;
+
+    protected $aliases = [];
+
+    public function __construct()
+    {
+        parent::__construct();
+    }
+
+    public function index()
+    {
+        // Sample Code Here ...
+    }
+
+    public function run()
+    {
+        // Sample Code Here ...
+    }
+
+}
+/* End of EmailSenderCommand file */

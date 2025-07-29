@@ -1,0 +1,13 @@
+{
+	"users": {
+		"config": "absa",
+		"secret": "password"
+	},
+	"host": "localhost",
+	"port": 80,
+	"servers": [
+		"host1",
+		"host2",
+		"host3"
+	]
+}

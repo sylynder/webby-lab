@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# SETTINGS
+MKCERT="mkcert" # path to mkcert binary
+# CERT_FOLDER="/tmp" # path to certificate folder
+CERT_FOLDER="/tmp" # path to certificate folder
+
+DEFAULT_HOST="localhost"
+DEFAULT_PORT=8085
+
+# check parameters
+[ $# -ne 3 ] && echo "usage: ssl-serve <domain> <server port> <stunnel port>" && exit
+
+# check that mkcert binary is found
+[ ! -x $(which $MKCERT) ] && echo "mkcert binary not found" && exit
+
+# create certificate folder if it does not exist
+[ ! -d $CERT_FOLDER ] && mkdir $CERT_FOLDER
+[ ! -d $CERT_FOLDER ] && echo "Unable to create certificate folder" && exit
+
+# check if script was run as sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run this script with sudo"
+    exit 1
+fi
+
+# get current user
+username=$(logname)
+
+# install certificate
+sudo su - "$username" -c "$MKCERT -key-file $CERT_FOLDER/$1-key.pem -cert-file $CERT_FOLDER/$1-cert.pem $1"
+
+# create bundled certificate for stunnel
+cat $CERT_FOLDER/$1-key.pem $CERT_FOLDER/$1-cert.pem > $CERT_FOLDER/$1-bundle.pem
+
+# set permissions for certificates
+chmod 600 $CERT_FOLDER/$1-bundle.pem $CERT_FOLDER/$1-key.pem $CERT_FOLDER/$1-cert.pem
+# chmod 600 $CERT_FOLDER/$1-bundle.pem
+
+# add domain to /etc/hosts
+echo "# added by webby ssl-serve" >> /etc/hosts
+echo "127.0.0.1 $1" >> /etc/hosts
+
+# start PHP built in server
+# php -S $1:$2 &
+
+php webby app:baseurl  https://$1:$3/ &
+php webby serve --host $1 --port $2 &
+
+# start stunnel
+stunnel3 -f -d $1:$3 -r $2 -p $CERT_FOLDER/$1-bundle.pem &
+
+sleep 1
+echo ""
+echo "## Your local SSL site is now available at https://$1:$3"
+
+# function to stop both servers
+cleanup() {
+    echo ""
+    echo "Removing /etc/hosts entry..."
+    sudo sed -i -e "/# added by webby ssl-serve/,/127.0.0.1 $1/d" /etc/hosts
+
+    echo "Removing certificate..."
+    rm -f $CERT_FOLDER/$1-bundle.pem $CERT_FOLDER/$1-key.pem $CERT_FOLDER/$1-cert.pem
+    # sudo rm -f $CERT_FOLDER/$1-bundle.pem
+
+    echo "Killing Webby and stunnel"
+    sudo kill $(jobs -p)
+
+    php webby app:baseurl --default
+    php webby clear:cache --plates
+    php webby clear:session
+
+    echo ""
+    echo "Killed Servers."
+}
+
+# trap Ctrl+C signal and call cleanup function
+trap cleanup INT
+
+# wait for both servers to finish
+wait
+
+# https://github.com/unconv/php-localhost-ssl

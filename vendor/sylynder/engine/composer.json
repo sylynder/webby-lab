@@ -1,0 +1,23 @@
+{
+    "name": "sylynder/engine",
+    "description": "",
+    "keywords": ["composer", "codeigniter", "webby", "sylynder"],
+    "license": "MIT",
+    "authors": [{
+        "name": "otengkwame",
+        "email": "developerkwame@gmail.com",
+        "role": "Software Engineer"
+    }],
+    "require": {
+        "php": "^8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Base\\": "Core/core"
+        },
+        "classmap": [
+            "CodeIgniter/Framework"
+        ]
+    },
+    "minimum-stability": "stable"
+}

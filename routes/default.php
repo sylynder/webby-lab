@@ -1,0 +1,63 @@
+<?php
+defined('COREPATH') or exit('No direct script access allowed');
+
+use Base\Route\Route;
+
+/*
+| -------------------------------------------------------------------------
+| Import Route Files
+| -------------------------------------------------------------------------
+| 
+| You can import routes from other files by using the following syntax
+| 
+| Note: you should not add the '.php' extension
+|
+| Route::import('name/of/route/file');
+|
+| If route file is not found in the default routes directory, you can use the following syntax
+| Route::import('name/of/route/file.php', true);
+| Here you will need to specify the full path to the route file with '.php' extension
+*/
+// Route::import('users');o
+
+/*
+| -------------------------------------------------------------------------
+| RESERVED OR DEFAULT ROUTES
+| -------------------------------------------------------------------------
+|
+| There are three reserved routes:
+|
+|	$route['default_controller'] = 'welcome';
+|
+| This route indicates which controller class should be loaded if the
+| URI contains no data. In the above example, the "welcome" class
+| would be loaded.
+|
+|	$route['404_override'] = 'errors/page_missing';
+|
+| This route will tell the Router which controller/method to use if those
+| provided in the URL cannot be matched to a valid route.
+|
+|	$route['translate_uri_dashes'] = false;
+|
+| This is not exactly a route, but allows you to automatically route
+| controller and method names that contain dashes. '-' isn't a valid
+| class or method name character, so it requires translation.
+| When you set this option to true, it will replace ALL dashes in the
+| controller and method URI segments.
+|
+| Examples:	my-controller/index	-> my_controller/index
+|		my-controller/my-method	-> my_controller/my_method
+|
+| Please make sure route names don't conflict in all the route files
+| 
+| $route['route-pattern'] = 'controller/method/segment1/segment2/segment3';
+| 
+| Is advisable that you don't use the alternate routing format here
+| A new way to add routes also come in this form
+| Route::get('route-pattern', 'module/controller/method/segment1/segment2/segment3');
+*/
+
+$route['default_controller'] = 'app';
+$route['404_override'] = 'errors/handle';
+$route['translate_uri_dashes'] = false;

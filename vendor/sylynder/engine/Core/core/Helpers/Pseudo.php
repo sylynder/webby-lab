@@ -1,0 +1,249 @@
+<?php
+
+namespace Base\Helpers;
+
+use InvalidArgumentException;
+use LengthException;
+use RuntimeException;
+
+/**
+ * PseudoHash: Encodes non-negative integers into fixed-length, non-sequential,
+ * base62-encoded strings, and decodes them back.
+ *
+ * Based on PseudoCrypt by KevBurns (http://blog.kevburnsjr.com/php-unique-hash)
+ * Reference/source: http://stackoverflow.com/a/1464155/933782
+ *
+ * This class requires the BCMath Arbitrary Precision Mathematics extension.
+ *
+ * Core Idea:
+ * 1. Map the integer non-linearly using multiplication with a large prime modulo 62^length.
+ * 2. Convert the result to base62.
+ * 3. Pad to ensure fixed length.
+ *
+ * Example:
+ * $hash = PseudoHash::encode(12345, 6); // e.g., "aBc12D"
+ * $number = PseudoHash::decode($hash);   // "12345" (string)
+ */
+class Pseudo
+{
+    /**
+     * The character set for base62 encoding.
+     * 0-9 (10), A-Z (26), a-z (26) = 62 characters.
+     */
+    private const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    private const BASE = 62;
+
+    /**
+     * Stores prime numbers and their modular multiplicative inverses (MMI)
+     * for different hash lengths.
+     *
+     * Key: Desired hash length (int)
+     * Value: ['prime' => string, 'inverse' => string]
+     *
+     * Primes selected are primes roughly > (62^length / golden_ratio).
+     * Inverses are calculated such that (prime * inverse) % (62^length) == 1.
+     * Calculated using extended Euclidean algorithm (e.g., using gmp_invert).
+     *
+     * @var array<int, array{prime: string, inverse: string}>
+     */
+    private static $primeData = [
+        // Length => ['prime' => P, 'inverse' => MMI (P^-1 mod 62^Length)]
+        // Note: Pre-calculate these values. Example values below might not be exact
+        // inverses for the given primes modulo 62^L - VERIFY THESE.
+        // Example for length 1: 62^1 = 62. Prime > 62/phi = 38.3. Let's use 41.
+        // Find X such that (41 * X) % 62 = 1. Using GMP: gmp_invert('41', '62') => '59'
+        1  => ['prime' => '41',                 'inverse' => '59'],
+        2  => ['prime' => '2377',               'inverse' => '1677'], // 62^2 = 3844. Prime > 2375. Use 2377. gmp_invert(2377, 3844) = 1677
+        3  => ['prime' => '147299',             'inverse' => '187507'], // 62^3 = 238328. Prime > 147297. Use 147299. gmp_invert(147299, 238328)=187507
+        4  => ['prime' => '9132313',            'inverse' => '5952585'], // 62^4 = 14776336. Prime > 9132298. Use 9132313. gmp_invert(9132313, 14776336)=5952585
+        5  => ['prime' => '566201239',          'inverse' => '643566407'], // 62^5 = 916132832. P > 566200495. Use 566201239. gmp_invert(566201239, 916132832)=643566407
+        6  => ['prime' => '35104476161',        'inverse' => '22071637057'], // 62^6 = 56800235584. P > 35104430684. Use 35104476161. gmp_invert(...) = 22071637057
+        7  => ['prime' => '2176477521929',      'inverse' => '294289236153'],  // 62^7 = 3521614606208
+        8  => ['prime' => '134941606358731',    'inverse' => '88879354792675'],  // 62^8 = 218340105584896
+        9  => ['prime' => '8366379594239857',   'inverse' => '7275288500431249'], // 62^9 = 13537086546263552
+        10 => ['prime' => '518715534842869223', 'inverse' => '280042546585394647'], // 62^10 = 839299365868340224
+        // Add more lengths as needed, ensuring primes and inverses are correctly calculated
+    ];
+
+    /**
+     * Encodes a non-negative integer into a fixed-length base62 hash.
+     *
+     * @param int|string $number The non-negative integer (or its string representation) to encode.
+     * @param int $length The desired length of the output hash. Must correspond to a key in self::$primeData.
+     * @return string The pseudo-random base62 hash string.
+     * @throws InvalidArgumentException If $number is invalid (negative, non-numeric).
+     * @throws LengthException If $length is not supported (not a key in self::$primeData).
+     * @throws RuntimeException If BCMath extension is not available.
+     */
+    public static function encode($number, int $length): string
+    {
+        self::ensureBcMath();
+        self::validateLength($length);
+
+        $numberStr = (string) $number;
+        self::validateNumberString($numberStr);
+
+        $primeInfo = self::$primeData[$length];
+        $prime = $primeInfo['prime'];
+        $modulus = bcpow((string) self::BASE, (string) $length); // 62^length
+
+        // Perform the core transformation: (number * prime) mod modulus
+        $transformed = bcmod(bcmul($numberStr, $prime), $modulus);
+
+        // Convert the transformed number to base62
+        $hash = self::base62Encode($transformed);
+
+        // Pad with leading '0' (the first char in CHARS) to the desired length
+        return str_pad($hash, $length, self::CHARS[0], STR_PAD_LEFT);
+    }
+
+    /**
+     * Decodes a base62 hash back to its original integer (as a string).
+     *
+     * @param string $hash The base62 hash string generated by encode().
+     * @return string The original non-negative integer as a string.
+     * @throws InvalidArgumentException If $hash contains invalid characters or is empty.
+     * @throws LengthException If the length of $hash is not supported (not a key in self::$primeData).
+     * @throws RuntimeException If BCMath extension is not available.
+     */
+    public static function decode(string $hash): string
+    {
+        self::ensureBcMath();
+
+        if ($hash === '') {
+             throw new InvalidArgumentException('Hash cannot be empty.');
+        }
+
+        $length = strlen($hash);
+        self::validateLength($length);
+        self::validateHashString($hash);
+
+        $primeInfo = self::$primeData[$length];
+        $inverse = $primeInfo['inverse']; // Modular Multiplicative Inverse
+        $modulus = bcpow((string) self::BASE, (string) $length); // 62^length
+
+        // Convert the base62 hash back to a number (decimal string)
+        $transformed = self::base62Decode($hash);
+
+        // Perform the reverse transformation: (transformed * inverse) mod modulus
+        $originalNumber = bcmod(bcmul($transformed, $inverse), $modulus);
+
+        return $originalNumber;
+    }
+
+    /**
+     * Converts a non-negative decimal number string to its base62 representation.
+     *
+     * @param string $numberDecimal A string representing a non-negative integer.
+     * @return string The base62 encoded string.
+     */
+    private static function base62Encode(string $numberDecimal): string
+    {
+        if ($numberDecimal === '0') {
+            return self::CHARS[0];
+        }
+
+        $base62 = '';
+        $base = (string) self::BASE;
+
+        while (bccomp($numberDecimal, '0') > 0) {
+            $remainder = bcmod($numberDecimal, $base);
+            $base62 .= self::CHARS[(int)$remainder]; // Append char for remainder
+            $numberDecimal = bcdiv($numberDecimal, $base, 0); // Integer division
+        }
+
+        return strrev($base62); // Result is built in reverse order
+    }
+
+    /**
+     * Converts a base62 encoded string back to a decimal number string.
+     *
+     * @param string $base62 The base62 encoded string.
+     * @return string A string representing the decimal integer.
+     */
+    private static function base62Decode(string $base62): string
+    {
+        $numberDecimal = '0';
+        $base = (string) self::BASE;
+        $length = strlen($base62);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $base62[$i];
+            $charValue = strpos(self::CHARS, $char); // Find the decimal value of the char
+
+            // $power = $length - 1 - $i;
+            $power = (string)($length - 1 - $i);
+
+            // $term = $charValue * (BASE ^ $power);
+            $term = bcmul((string)$charValue, bcpow($base, $power));
+
+            // $numberDecimal += $term;
+            $numberDecimal = bcadd($numberDecimal, $term);
+        }
+
+        return $numberDecimal;
+    }
+
+    /**
+     * Checks if the BCMath extension is loaded.
+     * @throws RuntimeException If BCMath is not available.
+     */
+    private static function ensureBcMath(): void
+    {
+        if (!extension_loaded('bcmath')) {
+            // @codeCoverageIgnoreStart
+            throw new RuntimeException('PseudoHash requires the BCMath extension.');
+            // @codeCoverageIgnoreEnd
+        }
+    }
+
+    /**
+     * Validates the requested hash length against supported lengths.
+     * @param int $length
+     * @throws LengthException If length is not supported.
+     */
+    private static function validateLength(int $length): void
+    {
+        if ($length <= 0) {
+             throw new LengthException('Length must be a positive integer.');
+        }
+        if (!isset(self::$primeData[$length])) {
+            throw new LengthException("Unsupported hash length: {$length}. Supported lengths are: " . implode(', ', array_keys(self::$primeData)));
+        }
+    }
+
+    /**
+     * Validates if a string represents a non-negative integer.
+     * @param string $numberStr
+     * @throws InvalidArgumentException If the string is not a valid non-negative integer.
+     */
+    private static function validateNumberString(string $numberStr): void
+    {
+        if (!ctype_digit($numberStr)) {
+             throw new InvalidArgumentException("Input must be a non-negative integer or its string representation. Got: '{$numberStr}'");
+        }
+        // Optional: Check for negative sign explicitly if ctype_digit wasn't sufficient,
+        // but ctype_digit should handle this. Redundant check removed.
+    }
+
+     /**
+     * Validates if a hash string contains only valid base62 characters.
+     * @param string $hash
+     * @throws InvalidArgumentException If invalid characters are found.
+     */
+    private static function validateHashString(string $hash): void
+    {
+        // Check if all characters in the hash are present in the CHARS constant
+        if (strspn($hash, self::CHARS) !== strlen($hash)) {
+            // Find the first invalid character for a more helpful message
+            $invalidChar = '';
+            for ($i = 0; $i < strlen($hash); $i++) {
+                if (strpos(self::CHARS, $hash[$i]) === false) {
+                    $invalidChar = $hash[$i];
+                    break;
+                }
+            }
+             throw new InvalidArgumentException("Invalid character '{$invalidChar}' found in hash '{$hash}'. Only characters from '" . self::CHARS . "' are allowed.");
+        }
+    }
+}
